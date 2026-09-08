@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Snaptastic Live WAV Cast Player</title>
+    <link rel="icon" href="data:,">
+    <link rel="shortcut icon" href="data:,">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Google Cast CAF Web Receiver SDK for native Google Cast devices -->
+    <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+    <script>
+        // Start Google Cast CAF context in head with custom message namespace registered BEFORE start()
+        let castContext = null;
+        let castPlayerManager = null;
+        let receivedLanConfig = null;
+        const SNAPTASTIC_NS = 'urn:x-cast:com.snaptastic.audio';
+
+        if (window.cast && cast.framework) {
+            try {
+                castContext = cast.framework.CastReceiverContext.getInstance();
+                castPlayerManager = castContext.getPlayerManager();
+
+                // Custom message listener MUST be registered before context.start()
+                // so CastOS advertises the namespace to senders (pychromecast)
+                castContext.addCustomMessageListener(SNAPTASTIC_NS, (event) => {
+                    console.log('[Snaptastic CAF] Config received:', event.data);
+                    receivedLanConfig = event.data;
+                    if (window.onLanConfigReceived) {
+                        window.onLanConfigReceived(event.data);
+                    }
+                });
+
+                castContext.start({ disableIdleTimeout: true, maxInactivity: 86400 });
+            } catch (e) {
+                console.log('[CAF Early Start Note]', e);
+            }
+        }
+    </script>
+    <style>
+        :root {
+            --accent: #6366f1;
+            --accent-glow: rgba(99, 102, 241, 0.4);
+            --bg-deep: #090a0f;
+            --glass-bg: rgba(20, 24, 38, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+        }
+
+        body {
+            background-color: var(--bg-deep);
+            color: var(--text-primary);
+            font-family: 'Outfit', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* Ambient Dynamic Artwork Glow Background */
+        .ambient-bg {
+            position: absolute;
+            top: -10%;
+            left: -10%;
+            width: 120%;
+            height: 120%;
+            background-size: cover;
+            background-position: center;
+            opacity: 0.55;
+            transition: background-image 1.2s ease-in-out, opacity 1.2s ease-in-out;
+            z-index: 0;
+            transform: translateZ(0);
+        }
+
+        .ambient-overlay {
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at center, rgba(9, 10, 15, 0.65) 0%, rgba(9, 10, 15, 0.95) 100%);
+            z-index: 1;
+        }
+
+        /* Main TV Stage - Zero GPU Strain Glassmorphism */
+        .stage {
+            position: relative;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5vw;
+            width: 90vw;
+            max-width: 1500px;
+            padding: 5vh 5vw;
+            background: rgba(20, 24, 38, 0.90);
+            border: 1px solid var(--glass-border);
+            border-radius: 36px;
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.7);
+            transform: translateZ(0);
+        }
+
+        /* Album Artwork Display */
+        .artwork-container {
+            position: relative;
+            width: 32vw;
+            max-width: 440px;
+            aspect-ratio: 1/1;
+            border-radius: 24px;
+            overflow: hidden;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7);
+            flex-shrink: 0;
+        }
+
+        .cover-art {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: opacity 0.4s ease-in-out;
+        }
+
+        /* Track Info & Visualizer */
+        .track-details {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 1.5vh;
+            min-width: 0;
+        }
+
+        .source-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 16px;
+            border-radius: 999px;
+            background: rgba(99, 102, 241, 0.15);
+            border: 1px solid rgba(99, 102, 241, 0.35);
+            color: #818cf8;
+            font-size: 1.1rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            width: fit-content;
+        }
+
+        .pulse-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #22c55e;
+            box-shadow: 0 0 10px rgba(34, 197, 94, 0.6);
+        }
+
+        .track-title {
+            font-size: clamp(2.2rem, 4vw, 3.8rem);
+            font-weight: 700;
+            line-height: 1.15;
+            color: #ffffff;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            text-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        }
+
+        .track-artist {
+            font-size: clamp(1.4rem, 2.4vw, 2.4rem);
+            font-weight: 500;
+            color: var(--text-secondary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .track-album {
+            font-size: clamp(1.1rem, 1.6vw, 1.6rem);
+            font-weight: 400;
+            color: #64748b;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* Sound Wave Visualizer */
+        .visualizer {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            height: 40px;
+            margin-top: 1.5vh;
+        }
+
+        .wave-bar {
+            width: 6px;
+            background: linear-gradient(to top, var(--accent), #a855f7);
+            border-radius: 4px;
+            animation: wave 1.2s ease-in-out infinite alternate;
+        }
+
+        .wave-bar:nth-child(1) { height: 40%; animation-delay: 0.1s; }
+        .wave-bar:nth-child(2) { height: 75%; animation-delay: 0.3s; }
+        .wave-bar:nth-child(3) { height: 95%; animation-delay: 0.5s; }
+        .wave-bar:nth-child(4) { height: 60%; animation-delay: 0.2s; }
+        .wave-bar:nth-child(5) { height: 85%; animation-delay: 0.4s; }
+        .wave-bar:nth-child(6) { height: 45%; animation-delay: 0.6s; }
+        .wave-bar:nth-child(7) { height: 90%; animation-delay: 0.25s; }
+        .wave-bar:nth-child(8) { height: 65%; animation-delay: 0.45s; }
+
+        @keyframes wave {
+            0% { transform: scaleY(0.3); }
+            100% { transform: scaleY(1.1); }
+        }
+
+        /* Snaptastic Brand Header */
+        .brand-badge {
+            position: absolute;
+            top: 4vh;
+            left: 5vw;
+            z-index: 20;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 8px 22px;
+            background: rgba(20, 24, 38, 0.85);
+            border: 1px solid var(--glass-border);
+            border-radius: 999px;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+
+        .brand-logo {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 1.15rem;
+            font-weight: 800;
+            letter-spacing: 2px;
+            background: linear-gradient(135deg, #818cf8 0%, #c084fc 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .brand-tag {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            padding-left: 10px;
+            border-left: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        /* Status & Clock pill */
+        .client-status {
+            font-size: 0.95rem;
+            color: #64748b;
+            margin-top: 1vh;
+        }
+    </style>
+</head>
+<body>
+    <div class="brand-badge">
+        <div class="brand-logo">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+            <span>SNAPTASTIC</span>
+        </div>
+        <div class="brand-tag" id="brandTag">Live Audio</div>
+    </div>
+
+    <div class="ambient-bg" id="ambientBg"></div>
+    <div class="ambient-overlay"></div>
+
+    <main class="stage">
+        <div class="artwork-container">
+            <img class="cover-art" id="coverArt" src="default_cover.png" alt="Album Artwork" onerror="this.src='default_cover.png'">
+        </div>
+
+        <div class="track-details">
+            <div class="source-badge">
+                <span class="pulse-dot"></span>
+                <span id="sourceName">Dark Vinyl</span>
+            </div>
+
+            <h1 class="track-title" id="trackTitle">Snaptastic TV</h1>
+            <h2 class="track-artist" id="trackArtist">Connecting to Snapserver...</h2>
+            <h3 class="track-album" id="trackAlbum"></h3>
+
+            <div class="visualizer">
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+            </div>
+
+            <div class="client-status" id="clientStatus">Active Stream: None &bull; Live Uncompressed WAV</div>
+        </div>
+    </main>
+
+    <!-- On-screen TV Error Diagnostic Banner -->
+    <div id="debugError" style="position:fixed; bottom:16px; left:20px; right:20px; color:#ff4d4d; font-family:monospace; font-size:0.95rem; background:rgba(15,10,10,0.92); border:1px solid rgba(255,77,77,0.5); padding:10px 16px; border-radius:12px; z-index:9999; display:none; box-shadow:0 8px 30px rgba(0,0,0,0.8); word-break:break-all;"></div>
+
+    <!-- Browser Autoplay Unmute Overlay -->
+    <div id="unmutePrompt" onclick="startAudioLive(event)" style="position:fixed; top:20px; right:20px; z-index:999999; display:none; align-items:center; gap:10px; background:linear-gradient(135deg, #6366f1, #a855f7); color:white; padding:11px 22px; border-radius:9999px; font-weight:700; font-size:0.95rem; cursor:pointer; box-shadow:0 10px 25px rgba(99, 102, 241, 0.7); pointer-events:auto;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle;"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+        <span>ðŸ”Š Tap to Play Audio</span>
+    </div>
+
+    <audio id="fallbackAudio" preload="none" style="display:none;"></audio>
+
+    <script>
+        function showError(msg) {
+            const el = document.getElementById('debugError');
+            if (el) {
+                el.textContent = `[Error] ${msg}`;
+                el.style.display = 'block';
+            }
+        }
+        function clearError() {
+            const el = document.getElementById('debugError');
+            if (el && el.style.display !== 'none') el.style.display = 'none';
+        }
+
+        window.onerror = function(msg, url, line) {
+            showError(`JS Error: ${msg} (${line})`);
+        };
+        window.onunhandledrejection = function(e) {
+            showError(`Async Rejection: ${e.reason ? (e.reason.message || e.reason) : e}`);
+        };
+
+        // Screen WakeLock to prevent Google TV / Android TV screensaver from taking over
+        if ('wakeLock' in navigator) {
+            const acquireWakeLock = async () => {
+                try {
+                    await navigator.wakeLock.request('screen');
+                } catch (err) {}
+            };
+            acquireWakeLock();
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') acquireWakeLock();
+            });
+        }
+
+        const urlParams = new URLSearchParams(window.location.search);
+        let host = urlParams.get('host') || window.location.hostname || '127.0.0.1';
+        let audioPort = urlParams.get('audio_port') || '8090';
+        let webPort = urlParams.get('web_port') || '8089';
+        let device = urlParams.get('device') || '';
+        const streaming = (urlParams.get('streaming') || '').toLowerCase();
+        const rawStreamPath = urlParams.get('stream_path') || (streaming === 'mp3' ? '/stream.mp3' : '/stream.wav');
+
+        const fallbackAudio = document.getElementById('fallbackAudio');
+        const cleanStreamPath = rawStreamPath.startsWith('/') ? rawStreamPath : '/' + rawStreamPath;
+        let isMp3 = streaming === 'mp3' || cleanStreamPath.toLowerCase().endsWith('.mp3');
+        const effectiveStreamPath = isMp3
+            ? cleanStreamPath.replace(/\.wav$/i, '.mp3').replace(/\.pcm$/i, '.mp3')
+            : cleanStreamPath.replace(/\.mp3$/i, '.wav').replace(/\.pcm$/i, '.wav');
+        let baseAudioUrl = `http://${host}:${audioPort}${effectiveStreamPath}`;
+
+        const ambientBg = document.getElementById('ambientBg');
+        const coverArt = document.getElementById('coverArt');
+        const trackTitle = document.getElementById('trackTitle');
+        const trackArtist = document.getElementById('trackArtist');
+        const trackAlbum = document.getElementById('trackAlbum');
+        const sourceName = document.getElementById('sourceName');
+        const clientStatus = document.getElementById('clientStatus');
+        const brandTag = document.getElementById('brandTag');
+        if (brandTag) brandTag.textContent = isMp3 ? 'Progressive MP3' : 'Live WAV Audio';
+
+        function isCastHardware() {
+            const ua = navigator.userAgent || '';
+            return ua.includes('CrKey') || ua.includes('Fuchsia');
+        }
+
+        function isVirtualDevice() {
+            const raw = (device || urlParams.get('device') || '').toLowerCase().trim().replace(/\s+/g, '-');
+            return !raw || raw === 'virtual-cast' || raw.includes('virtual');
+        }
+
+        let isSessionActive = true;
+
+        // Google Cast CAF Native Web Receiver listeners
+        const ctx = castContext || (window.cast && cast.framework ? cast.framework.CastReceiverContext.getInstance() : null);
+        if (ctx) {
+            try {
+                if (!castPlayerManager) castPlayerManager = ctx.getPlayerManager();
+
+                window.onLanConfigReceived = (cfg) => {
+                    console.log('[Snaptastic CAF] Applying config payload:', cfg);
+                    if (!cfg) return;
+
+                    // Direct real-time stop signal over Cast channel
+                    if (cfg.type === 'stop' || cfg.action === 'stop' || cfg.active === false) {
+                        console.log('[Snaptastic CAF] Stop signal received.');
+                        isSessionActive = false;
+                        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+                        if (fallbackAudio) {
+                            fallbackAudio.pause();
+                            fallbackAudio.removeAttribute('src');
+                            fallbackAudio.load();
+                        }
+                        if (ctx) {
+                            try { ctx.stop(); } catch(e) {}
+                        }
+                        if (isCastHardware() && !isVirtualDevice()) {
+                            console.log('[Snaptastic CAF] Closing hardware receiver window...');
+                            try { window.close(); } catch(e) {}
+                        }
+                        return;
+                    }
+
+                    // Direct real-time metadata push over Cast channel
+                    if (cfg.type === 'metadata') {
+                        if (typeof window.applyMetadataPayload === 'function') {
+                            window.applyMetadataPayload(cfg);
+                        }
+                        return;
+                    }
+
+                    if (cfg.host) host = cfg.host;
+                    if (cfg.audio_port) audioPort = cfg.audio_port.toString();
+                    if (cfg.web_port) webPort = cfg.web_port.toString();
+                    if (cfg.device) device = cfg.device;
+                    if (cfg.streaming) {
+                        isMp3 = (cfg.streaming === 'mp3');
+                        if (brandTag) brandTag.textContent = isMp3 ? 'Progressive MP3' : 'Live WAV Audio';
+                    }
+                    const streamExt = isMp3 ? '.mp3' : '.wav';
+                    const path = device ? `/stream/${device}${streamExt}` : `/stream${streamExt}`;
+                    baseAudioUrl = `http://${host}:${audioPort}${path}`;
+                    lastTrackKey = '';
+                    startNativeAudioLive();
+                    if (typeof updateMetadata === 'function') {
+                        updateMetadata();
+                    }
+                };
+
+                if (receivedLanConfig) {
+                    window.onLanConfigReceived(receivedLanConfig);
+                }
+
+                // Google TV Remote / Lockscreen / Google Home Media Interceptors:
+                if (castPlayerManager) {
+                    castPlayerManager.setMessageInterceptor(cast.framework.messages.MessageType.SKIP_NEXT, () => {
+                        console.log('[Snaptastic CAF] Remote Next Pressed');
+                        fetch(`http://${host}:${webPort}/api/stream/next`).catch(() => {});
+                        return null;
+                    });
+                    castPlayerManager.setMessageInterceptor(cast.framework.messages.MessageType.SKIP_PREV, () => {
+                        console.log('[Snaptastic CAF] Remote Previous Pressed');
+                        fetch(`http://${host}:${webPort}/api/stream/prev`).catch(() => {});
+                        return null;
+                    });
+                    castPlayerManager.setMessageInterceptor(cast.framework.messages.MessageType.PLAY, () => {
+                        console.log('[Snaptastic CAF] Remote Play Pressed');
+                        fallbackAudio.play().catch(() => {});
+                        fetch(`http://${host}:${webPort}/api/stream/play`).catch(() => {});
+                        return null;
+                    });
+                    castPlayerManager.setMessageInterceptor(cast.framework.messages.MessageType.PAUSE, () => {
+                        console.log('[Snaptastic CAF] Remote Pause Pressed');
+                        fallbackAudio.pause();
+                        fetch(`http://${host}:${webPort}/api/stream/pause`).catch(() => {});
+                        return null;
+                    });
+                }
+            } catch (e) {
+                console.log('[Cast] Receiver listeners note:', e);
+            }
+        }
+
+        function userUnlockAudio() {
+            const prompt = document.getElementById('unmutePrompt');
+            if (fallbackAudio && fallbackAudio.paused && fallbackAudio.src && !fallbackAudio.error) {
+                fallbackAudio.play().then(() => {
+                    if (prompt) prompt.style.display = 'none';
+                }).catch(() => {});
+                return true;
+            }
+            return false;
+        }
+        window.addEventListener('click', userUnlockAudio, { passive: true });
+        window.addEventListener('touchstart', userUnlockAudio, { passive: true });
+
+        // Native HTML5 Audio with live uncompressed stream
+        function startNativeAudioLive(e) {
+            if (e && e.stopPropagation) e.stopPropagation();
+            const prompt = document.getElementById('unmutePrompt');
+            const fullUrl = `${baseAudioUrl}?_t=${Date.now()}`;
+
+            try {
+                fallbackAudio.pause();
+                fallbackAudio.removeAttribute('src');
+                fallbackAudio.load();
+            } catch(err) {}
+
+            fallbackAudio.src = fullUrl;
+            fallbackAudio.load();
+            fallbackAudio.play()
+                .then(() => {
+                    if (prompt) prompt.style.display = 'none';
+                })
+                .catch(err => {
+                    console.log('[Live Audio] Autoplay awaiting interaction:', err);
+                    if (prompt) prompt.style.display = 'flex';
+                });
+        }
+
+        function startAudioLive(e) {
+            if (e && e.stopPropagation) e.stopPropagation();
+            if (fallbackAudio && fallbackAudio.paused && fallbackAudio.src && !fallbackAudio.error) {
+                fallbackAudio.play().then(() => {
+                    const prompt = document.getElementById('unmutePrompt');
+                    if (prompt) prompt.style.display = 'none';
+                }).catch(() => {
+                    startNativeAudioLive(e);
+                });
+                return;
+            }
+            startNativeAudioLive(e);
+        }
+
+        let wasSessionActive = false;
+        const hasExplicitFormat = !!(urlParams.get('streaming') || urlParams.get('stream_path'));
+        let hasStartedAudio = false;
+
+        // Initial attempt: only start immediately if explicit format was passed in URL.
+        // Otherwise wait for initial updateMetadata() to resolve server format.
+        if (hasExplicitFormat) {
+            hasStartedAudio = true;
+            wasSessionActive = true;
+            startAudioLive();
+        }
+
+        // Auto-sync to real-time live edge when unpausing
+        let lastPauseTime = 0;
+        fallbackAudio.addEventListener('pause', () => {
+            lastPauseTime = Date.now();
+        });
+        fallbackAudio.addEventListener('play', () => {
+            if (lastPauseTime && (Date.now() - lastPauseTime > 1200)) {
+                fallbackAudio.src = `${baseAudioUrl}?_t=${Date.now()}`;
+                fallbackAudio.play().catch(() => {});
+            }
+            lastPauseTime = 0;
+        });
+
+        // Self-healing: auto-reconnect to real-time live edge if Wi-Fi / LAN drops or stalls
+        let reconnectTimer = null;
+        function scheduleReconnect(delayMs = 200) {
+            if (!isSessionActive) return;
+            if (reconnectTimer) return;
+            reconnectTimer = setTimeout(() => {
+                reconnectTimer = null;
+                if (!isSessionActive) return;
+                console.log('[Audio] Connection interrupted, re-attaching to fresh live edge...');
+                startNativeAudioLive();
+            }, delayMs);
+        }
+
+        fallbackAudio.addEventListener('error', () => scheduleReconnect(500));
+        fallbackAudio.addEventListener('ended', () => scheduleReconnect(100));
+
+        // ZERO-LAG LIVE EDGE CLAMP:
+        setInterval(() => {
+            try {
+                if (isSessionActive && fallbackAudio && !fallbackAudio.paused && fallbackAudio.seekable && fallbackAudio.seekable.length > 0) {
+                    const liveEnd = fallbackAudio.seekable.end(fallbackAudio.seekable.length - 1);
+                    if (Number.isFinite(liveEnd)) {
+                        const lag = liveEnd - fallbackAudio.currentTime;
+                        if (lag > 1.5) {
+                            console.log(`[Audio Live Edge Clamp] Lag detected: ${lag.toFixed(2)}s. Fast-forwarding directly to live audio!`);
+                            fallbackAudio.currentTime = Math.max(0, liveEnd - 0.25);
+                        }
+                    }
+                }
+            } catch(e) {}
+        }, 400);
+
+        const DEFAULT_COVER = 'default_cover.png';
+
+        // Metadata Polling & Live Visual Updates
+        let lastTrackKey = '';
+        let lastSource = '';
+        let lastEpoch = 0;
+        let metaFailCount = 0;
+        function applyMetadataPayload(meta, streamEpoch = 0) {
+            if (!meta) return;
+            const title = meta.title || 'Snaptastic TV';
+            const artist = meta.artist || 'Live Broadcast';
+            const album = meta.album || '';
+            const source = meta.source || 'Snapcast';
+            const rawArt = meta.artUrl || '';
+            const epoch = streamEpoch || meta.epoch || 0;
+
+            // Instant reconnect on source or stream epoch reset (only while session is actively running):
+            if (isSessionActive && ((lastSource && source !== lastSource) || (lastEpoch && epoch && epoch !== lastEpoch))) {
+                console.log(`[Live Switch] Source/Epoch changed (${lastSource}->${source}, epoch ${lastEpoch}->${epoch}). Re-attaching to live edge!`);
+                lastSource = source;
+                lastEpoch = epoch;
+                startNativeAudioLive();
+            } else {
+                if (!lastSource) lastSource = source;
+                if (!lastEpoch) lastEpoch = epoch;
+            }
+
+            // Stable key that only changes when the track, source or format actually changes
+            const currentKey = `${title}:::${artist}:::${album}:::${source}:::${isMp3}`;
+            if (currentKey !== lastTrackKey) {
+                lastTrackKey = currentKey;
+                trackTitle.textContent = title;
+                trackArtist.textContent = artist;
+                trackAlbum.textContent = album;
+                const formatLabel = isMp3 ? 'Progressive MP3' : 'Live Uncompressed WAV';
+
+                const isDefault = !source || ['snapcast', 'snaptastic', 'default', 'none', 'dark vinyl', ''].includes(source.toLowerCase().trim());
+                if (sourceName) {
+                    sourceName.textContent = isDefault ? 'Dark Vinyl' : source;
+                }
+                if (clientStatus) {
+                    clientStatus.textContent = `Active Stream: ${isDefault ? 'None' : source} \u2022 ${formatLabel}`;
+                }
+
+                let artUrl = DEFAULT_COVER;
+                if (rawArt && (rawArt.startsWith('http://') || rawArt.startsWith('https://') || rawArt.startsWith('data:image'))) {
+                    artUrl = rawArt;
+                } else if (rawArt && (rawArt.includes('cover.jpg') || rawArt.includes('/cover'))) {
+                    artUrl = `http://${host}:${webPort}/cover.jpg?_t=${Date.now()}`;
+                }
+
+                if (artUrl === DEFAULT_COVER) {
+                    coverArt.src = DEFAULT_COVER;
+                    ambientBg.style.backgroundImage = `url('${DEFAULT_COVER}')`;
+                } else {
+                    const newImg = new Image();
+                    newImg.onload = () => {
+                        coverArt.src = artUrl;
+                        ambientBg.style.backgroundImage = `url('${artUrl}')`;
+                    };
+                    newImg.onerror = () => {
+                        coverArt.src = DEFAULT_COVER;
+                        ambientBg.style.backgroundImage = `url('${DEFAULT_COVER}')`;
+                    };
+                    newImg.src = artUrl;
+                }
+            }
+        }
+        window.applyMetadataPayload = applyMetadataPayload;
+
+        function updateMetadata() {
+            const targetHost = host || urlParams.get('host') || window.location.hostname;
+            const targetPort = webPort || urlParams.get('web_port') || '8089';
+            let statusUrl = `http://${targetHost}:${targetPort}/api/cast/status${device ? '?device=' + encodeURIComponent(device) : ''}`;
+            
+            if (window.location.hostname === targetHost && window.location.port === targetPort) {
+                statusUrl = `/api/cast/status${device ? '?device=' + encodeURIComponent(device) : ''}`;
+            }
+
+            fetch(statusUrl)
+                .then(r => {
+                    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
+                    return r.json();
+                })
+                .then(data => {
+                    metaFailCount = 0;
+                    clearError();
+                    if (data && data.cast) {
+                        if (data.cast.active === false) {
+                            wasSessionActive = false;
+                            isSessionActive = false;
+                            if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+                            console.log('[Cast Player] Cast session inactive on server.');
+                            if (fallbackAudio) {
+                                fallbackAudio.pause();
+                                fallbackAudio.removeAttribute('src');
+                                fallbackAudio.load();
+                            }
+                            if (ctx) {
+                                try { ctx.stop(); } catch(e) {}
+                            }
+                            if (isCastHardware() && !isVirtualDevice()) {
+                                console.log('[Cast Player] Exiting hardware player...');
+                                try { window.close(); } catch(e) {}
+                                return;
+                            }
+                            // In browser tabs or virtual-cast, stay open and display standby state!
+                            const meta = data.cast.now_playing || {};
+                            applyMetadataPayload(meta, data.cast.epoch || 0);
+                            return;
+                        }
+
+                        isSessionActive = true;
+
+                        const becameActive = !wasSessionActive;
+                        wasSessionActive = true;
+
+                        const serverStreaming = (data.cast.streaming_mode || data.cast.streaming || '').toLowerCase();
+                        if (serverStreaming) {
+                            const newIsMp3 = serverStreaming === 'mp3';
+                            if (newIsMp3 !== isMp3) {
+                                isMp3 = newIsMp3;
+                                if (brandTag) brandTag.textContent = isMp3 ? 'Progressive MP3' : 'Live WAV Audio';
+                                const streamExt = isMp3 ? '.mp3' : '.wav';
+                                const path = device ? `/stream/${device}${streamExt}` : `/stream${streamExt}`;
+                                baseAudioUrl = `http://${host}:${audioPort}${path}`;
+                            }
+                        }
+
+                        // Auto wake-up: if session just transitioned from inactive -> active, or audio element lost its src, re-attach immediately!
+                        const audioNeedsAttach = becameActive || !fallbackAudio.src;
+                        if (audioNeedsAttach) {
+                            console.log('[Cast Player] Session active on server, auto-attaching audio to live edge...');
+                            const streamExt = isMp3 ? '.mp3' : '.wav';
+                            const path = device ? `/stream/${device}${streamExt}` : `/stream${streamExt}`;
+                            baseAudioUrl = `http://${host}:${audioPort}${path}`;
+                            lastTrackKey = '';
+                            hasStartedAudio = true;
+                            startNativeAudioLive();
+                        }
+
+                        const meta = data.cast.now_playing || {};
+                        applyMetadataPayload(meta, data.cast.epoch || 0);
+                    }
+                })
+                .catch(err => {
+                    metaFailCount++;
+                    if (metaFailCount >= 6) {
+                        showError(`Metadata poll note: ${err.message}`);
+                    }
+                });
+        }
+
+        setInterval(updateMetadata, 2500);
+        updateMetadata();
+    </script>
+</body>
+</html>
