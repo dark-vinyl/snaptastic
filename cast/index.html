@@ -372,7 +372,9 @@
         let webPort = urlParams.get('web_port') || '8089';
         let device = urlParams.get('device') || '';
         const streaming = (urlParams.get('streaming') || '').toLowerCase();
-        const rawStreamPath = urlParams.get('stream_path') || (streaming === 'mp3' ? '/stream.mp3' : '/stream.wav');
+        const defaultExt = (streaming === 'mp3' ? '.mp3' : '.wav');
+        const defaultStreamPath = device ? `/stream/${device}${defaultExt}` : `/stream${defaultExt}`;
+        const rawStreamPath = urlParams.get('stream_path') || defaultStreamPath;
 
         const fallbackAudio = document.getElementById('fallbackAudio');
         const cleanStreamPath = rawStreamPath.startsWith('/') ? rawStreamPath : '/' + rawStreamPath;
@@ -557,13 +559,19 @@
             startAudioLive();
         }
 
-        // Auto-sync to real-time live edge when unpausing
+        // Auto-sync to real-time live edge when unpausing (only after audio has actually played once)
         let lastPauseTime = 0;
+        let hasActuallyPlayed = false;
+        fallbackAudio.addEventListener('playing', () => {
+            hasActuallyPlayed = true;
+        });
         fallbackAudio.addEventListener('pause', () => {
-            lastPauseTime = Date.now();
+            if (hasActuallyPlayed) {
+                lastPauseTime = Date.now();
+            }
         });
         fallbackAudio.addEventListener('play', () => {
-            if (lastPauseTime && (Date.now() - lastPauseTime > 1200)) {
+            if (hasActuallyPlayed && lastPauseTime && (Date.now() - lastPauseTime > 1200)) {
                 fallbackAudio.src = `${baseAudioUrl}?_t=${Date.now()}`;
                 fallbackAudio.play().catch(() => {});
             }
