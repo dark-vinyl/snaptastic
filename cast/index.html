@@ -547,11 +547,11 @@
 
         let wasSessionActive = false;
         const hasExplicitFormat = !!(urlParams.get('streaming') || urlParams.get('stream_path'));
+        const hasHost = !!(host && host !== '127.0.0.1');
         let hasStartedAudio = false;
 
-        // Initial attempt: only start immediately if explicit format was passed in URL.
-        // Otherwise wait for initial updateMetadata() to resolve server format.
-        if (hasExplicitFormat) {
+        // Start immediately if host or explicit format is known; don't wait 3s for metadata poll!
+        if (hasHost || hasExplicitFormat) {
             hasStartedAudio = true;
             wasSessionActive = true;
             startAudioLive();
@@ -768,7 +768,7 @@
                 });
         }
 
-        setInterval(updateMetadata, 2500);
+        setInterval(updateMetadata, 1200);
         updateMetadata();
     </script>
 </body>
