@@ -18,8 +18,11 @@
         let receivedLanConfig = null;
         const SNAPTASTIC_NS = 'urn:x-cast:io.github.dark-vinyl.snaptastic';
 
-        const earlyParams = new URLSearchParams(window.location.search);
-        const isUrlDriven = earlyParams.has('host') || earlyParams.has('stream_path') || earlyParams.has('audio_port');
+        const rawEarlyHash = window.location.hash ? window.location.hash.replace(/^#\/?/, '') : '';
+        const earlyHash = new URLSearchParams(rawEarlyHash);
+        const earlySearch = new URLSearchParams(window.location.search);
+        const isUrlDriven = earlyHash.has('host') || earlyHash.has('stream_path') || earlyHash.has('audio_port') ||
+                            earlySearch.has('host') || earlySearch.has('stream_path') || earlySearch.has('audio_port');
 
         if (!isUrlDriven && window.cast && cast.framework) {
             try {
@@ -357,7 +360,13 @@
             });
         }
 
-        const urlParams = new URLSearchParams(window.location.search);
+        const rawHash = window.location.hash ? window.location.hash.replace(/^#\/?/, '') : '';
+        const hashParams = new URLSearchParams(rawHash);
+        const searchParams = new URLSearchParams(window.location.search);
+        const urlParams = {
+            get: (key) => hashParams.get(key) || searchParams.get(key),
+            has: (key) => hashParams.has(key) || searchParams.has(key)
+        };
         let host = urlParams.get('host') || window.location.hostname || '127.0.0.1';
         let audioPort = urlParams.get('audio_port') || '8090';
         let webPort = urlParams.get('web_port') || '8089';
