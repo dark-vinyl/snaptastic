@@ -12,13 +12,16 @@
     <!-- Google Cast CAF Web Receiver SDK for native Google Cast devices -->
     <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
     <script>
-        // Start Google Cast CAF context in head with custom message namespace registered BEFORE start()
+        // Start Google Cast CAF context in head ONLY for native Cast Receiver launches (not URL/DashCast-driven)
         let castContext = null;
         let castPlayerManager = null;
         let receivedLanConfig = null;
-        const SNAPTASTIC_NS = 'urn:x-cast:com.snaptastic.audio';
+        const SNAPTASTIC_NS = 'urn:x-cast:io.github.dark-vinyl.snaptastic';
 
-        if (window.cast && cast.framework) {
+        const earlyParams = new URLSearchParams(window.location.search);
+        const isUrlDriven = earlyParams.has('host') || earlyParams.has('stream_path') || earlyParams.has('audio_port');
+
+        if (!isUrlDriven && window.cast && cast.framework) {
             try {
                 castContext = cast.framework.CastReceiverContext.getInstance();
                 castPlayerManager = castContext.getPlayerManager();
@@ -33,7 +36,7 @@
                     }
                 });
 
-                castContext.start({ disableIdleTimeout: true, maxInactivity: 86400 });
+                castContext.start({ disableIdleTimeout: true, maxInactivity: 86400, statusText: 'Snaptastic Live' });
             } catch (e) {
                 console.log('[CAF Early Start Note]', e);
             }
@@ -316,7 +319,7 @@
     <!-- Browser Autoplay Unmute Overlay -->
     <div id="unmutePrompt" onclick="startAudioLive(event)" style="position:fixed; top:20px; right:20px; z-index:999999; display:none; align-items:center; gap:10px; background:linear-gradient(135deg, #6366f1, #a855f7); color:white; padding:11px 22px; border-radius:9999px; font-weight:700; font-size:0.95rem; cursor:pointer; box-shadow:0 10px 25px rgba(99, 102, 241, 0.7); pointer-events:auto;">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle;"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
-        <span>ðŸ”Š Tap to Play Audio</span>
+        <span>🔊 Tap to Play Audio</span>
     </div>
 
     <audio id="fallbackAudio" preload="none" style="display:none;"></audio>
@@ -656,9 +659,18 @@
                     };
                     newImg.src = artUrl;
                 }
+
+                if (castContext) {
+                    try {
+                        const stateText = title ? `${title} - ${artist || 'Snaptastic'}` : 'Snaptastic Live';
+                        castContext.setApplicationState(stateText);
+                    } catch(e) {}
+                }
             }
         }
         window.applyMetadataPayload = applyMetadataPayload;
+
+        let consecutiveInactiveCount = 0;
 
         function updateMetadata() {
             const targetHost = host || urlParams.get('host') || window.location.hostname;
@@ -679,22 +691,25 @@
                     clearError();
                     if (data && data.cast) {
                         if (data.cast.active === false) {
-                            wasSessionActive = false;
-                            isSessionActive = false;
-                            if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-                            console.log('[Cast Player] Cast session inactive on server.');
-                            if (fallbackAudio) {
-                                fallbackAudio.pause();
-                                fallbackAudio.removeAttribute('src');
-                                fallbackAudio.load();
-                            }
-                            if (ctx) {
-                                try { ctx.stop(); } catch(e) {}
-                            }
-                            if (isCastHardware() && !isVirtualDevice()) {
-                                console.log('[Cast Player] Exiting hardware player...');
-                                try { window.close(); } catch(e) {}
-                                return;
+                            consecutiveInactiveCount++;
+                            if (consecutiveInactiveCount >= 3 && wasSessionActive) {
+                                wasSessionActive = false;
+                                isSessionActive = false;
+                                if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+                                console.log('[Cast Player] Cast session confirmed inactive on server.');
+                                if (fallbackAudio) {
+                                    fallbackAudio.pause();
+                                    fallbackAudio.removeAttribute('src');
+                                    fallbackAudio.load();
+                                }
+                                if (ctx) {
+                                    try { ctx.stop(); } catch(e) {}
+                                }
+                                if (isCastHardware() && !isVirtualDevice()) {
+                                    console.log('[Cast Player] Exiting hardware player...');
+                                    try { window.close(); } catch(e) {}
+                                    return;
+                                }
                             }
                             // In browser tabs or virtual-cast, stay open and display standby state!
                             const meta = data.cast.now_playing || {};
@@ -702,6 +717,7 @@
                             return;
                         }
 
+                        consecutiveInactiveCount = 0;
                         isSessionActive = true;
 
                         const becameActive = !wasSessionActive;
